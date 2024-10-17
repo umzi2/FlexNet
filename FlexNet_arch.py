@@ -472,6 +472,7 @@ class FlexNet(nn.Module):
         self.pipeline = LinearPipeline(dim, num_blocks, window_size, hidden_rate, channel_norm, attn_drop, proj_drop) \
             if pipeline_type == "linear" else MetaPipeline(dim, num_blocks, window_size, hidden_rate, channel_norm, attn_drop, proj_drop)
         if upsampler == "n+c":
+            self.register_buffer("scale_factor", torch.tensor(scale, dtype=torch.uint8))
             self.to_img = nn.Sequential(
                 nn.Conv2d(dim * 2, dim, 3, 1, 1),
                 InterpolateUpsampler(dim, out_channels, scale))
