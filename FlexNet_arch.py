@@ -464,7 +464,7 @@ class FlexNet(nn.Module):
                  upsampler: Literal["ps", "n+c"] = "ps"
                  ):
         super(FlexNet, self).__init__()
-        self.window_size = window_size
+        self.register_buffer("window_size", torch.tensor(window_size,dtype=torch.uint8))
         self.pipeline_type = pipeline_type
         self.scale = scale
         self.short_cut = ConvBlock(inp_channels, dim)
@@ -483,10 +483,9 @@ class FlexNet(nn.Module):
 
     def check_img_size(self, x, resolution):
         h, w = resolution
-        scaled_size = self.window_size
+        scaled_size = self.window_size.to(int)
         if self.pipeline_type == "meta":
             scaled_size *= 8
-
         mod_pad_h = (scaled_size - h % scaled_size) % scaled_size
         mod_pad_w = (scaled_size - w % scaled_size) % scaled_size
         return F.pad(x, (0, mod_pad_w, 0, mod_pad_h), "reflect")
