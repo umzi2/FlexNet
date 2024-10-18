@@ -201,11 +201,11 @@ class OmniShift(nn.Module):
         if self.training:
             self.repram_flag = True
             out = self.forward_train(x)
-        elif self.training == False and self.repram_flag == True:
+        elif not self.training and self.repram_flag:
             self.reparam_5x5()
             self.repram_flag = False
             out = self.conv5x5_reparam(x)
-        elif self.training == False and self.repram_flag == False:
+        elif not self.training and not self.repram_flag:
             out = self.conv5x5_reparam(x)
 
         return out
