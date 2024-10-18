@@ -772,3 +772,7 @@ class FlexNet(nn.Module):
         x = torch.cat([x, short_cut], dim=1)
         x = self.to_img(x)
         return x[:, :, : h * self.scale, : w * self.scale]
+
+
+def MetaFlexNet(**kwargs):
+    return FlexNet(dim=48, num_blocks=(4, 6, 6, 8), pipeline_type="meta", **kwargs)
