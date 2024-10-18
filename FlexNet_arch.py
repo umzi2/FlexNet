@@ -4,8 +4,95 @@ from typing import Literal
 import torch
 import torch.nn.functional as F
 from einops import rearrange
-from torch import nn
+from torch import nn, Tensor
 
+
+class DySample(nn.Module):
+    """Adapted from 'Learning to Upsample by Learning to Sample':
+    https://arxiv.org/abs/2308.15085
+    https://github.com/tiny-smart/dysample
+    """
+
+    def __init__(
+            self,
+            in_channels: int,
+            out_ch: int,
+            scale: int = 2,
+            groups: int = 4,
+            end_convolution: bool = True,
+    ) -> None:
+        super().__init__()
+
+        try:
+            assert in_channels >= groups
+            assert in_channels % groups == 0
+        except:
+            msg = "Incorrect in_channels and groups values."
+            raise ValueError(msg)
+
+        out_channels = 2 * groups * scale ** 2
+        self.scale = scale
+        self.groups = groups
+        self.end_convolution = end_convolution
+        if end_convolution:
+            self.end_conv = nn.Conv2d(in_channels, out_ch, kernel_size=1)
+
+        self.offset = nn.Conv2d(in_channels, out_channels, 1)
+        self.scope = nn.Conv2d(in_channels, out_channels, 1, bias=False)
+        if self.training:
+            nn.init.trunc_normal_(self.offset.weight, std=0.02)
+            nn.init.constant_(self.scope.weight, val=0)
+
+        self.register_buffer("init_pos", self._init_pos())
+
+    def _init_pos(self) -> Tensor:
+        h = torch.arange((-self.scale + 1) / 2, (self.scale - 1) / 2 + 1) / self.scale
+        return (
+            torch.stack(torch.meshgrid([h, h], indexing="ij"))
+            .transpose(1, 2)
+            .repeat(1, self.groups, 1)
+            .reshape(1, -1, 1, 1)
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        offset = self.offset(x) * self.scope(x).sigmoid() * 0.5 + self.init_pos
+        B, _, H, W = offset.shape
+        offset = offset.view(B, 2, -1, H, W)
+        coords_h = torch.arange(H) + 0.5
+        coords_w = torch.arange(W) + 0.5
+
+        coords = (
+            torch.stack(torch.meshgrid([coords_w, coords_h], indexing="ij"))
+            .transpose(1, 2)
+            .unsqueeze(1)
+            .unsqueeze(0)
+            .type(x.dtype)
+            .to(x.device, non_blocking=True)
+        )
+        normalizer = torch.tensor(
+            [W, H], dtype=x.dtype, device=x.device, pin_memory=True
+        ).view(1, 2, 1, 1, 1)
+        coords = 2 * (coords + offset) / normalizer - 1
+
+        coords = (
+            F.pixel_shuffle(coords.reshape(B, -1, H, W), self.scale)
+            .view(B, 2, -1, self.scale * H, self.scale * W)
+            .permute(0, 2, 3, 4, 1)
+            .contiguous()
+            .flatten(0, 1)
+        )
+        output = F.grid_sample(
+            x.reshape(B * self.groups, -1, H, W),
+            coords,
+            mode="bilinear",
+            align_corners=False,
+            padding_mode="border",
+        ).view(B, -1, self.scale * H, self.scale * W)
+
+        if self.end_convolution:
+            output = self.end_conv(output)
+
+        return output
 
 class Interpolate(nn.Module):
     def __init__(self, scale_factor: int = 4, mode: str = "nearest"):
@@ -30,6 +117,8 @@ class InterpolateUpsampler(nn.Sequential):
         elif scale == 3:
             m.append(nn.Conv2d(dim, dim, 3, 1, 1))
             m.append(Interpolate(scale))
+            m.append(nn.LeakyReLU(negative_slope=0.2, inplace=True))
+            m.append(nn.Conv2d(dim, dim, 3, 1, 1))
             m.append(nn.LeakyReLU(negative_slope=0.2, inplace=True))
 
         m.append(nn.Conv2d(dim, out_ch, 3, 1, 1))
@@ -254,7 +343,7 @@ class ChannelMix(nn.Module):
         self.omni_shift = OmniShift(dim=n_embd)
 
         if key_norm:
-            self.key_norm = nn.LayerNorm(hidden_sz)
+            self.key_norm = nn.RMSNorm(hidden_sz)
         else:
             self.key_norm = None
         self.receptance = nn.Linear(n_embd, n_embd, bias=False)
@@ -454,14 +543,14 @@ class FlexNet(nn.Module):
                  out_channels: int = 3,
                  scale: int = 4,
                  dim: int = 64,
-                 num_blocks: tuple[int] = (8, 8, 8, 8),  # meta = (8,8,8,8), # linear = (6, 6, 6, 6, 6, 6),
+                 num_blocks: tuple[int] = (6, 6, 6, 6, 6, 6),  # meta = (8,8,8,8), # linear = (6, 6, 6, 6, 6, 6),
                  window_size: int = 8,
                  hidden_rate: int = 4,
                  channel_norm: bool = False,
                  attn_drop: float = 0.0,
                  proj_drop: float = 0.0,
-                 pipeline_type: Literal["meta", "linear"] = "meta",
-                 upsampler: Literal["ps", "n+c"] = "ps"
+                 pipeline_type: Literal["meta", "linear"] = "linear",
+                 upsampler: Literal["ps", "n+c", "dys"] = "ps"
                  ):
         super(FlexNet, self).__init__()
         self.register_buffer("window_size", torch.tensor(window_size,dtype=torch.uint8))
@@ -476,6 +565,8 @@ class FlexNet(nn.Module):
             self.to_img = nn.Sequential(
                 nn.Conv2d(dim * 2, dim, 3, 1, 1),
                 InterpolateUpsampler(dim, out_channels, scale))
+        elif upsampler == "dys":
+            self.to_img = DySample(dim * 2, out_channels, scale)
         else:
             self.to_img = nn.Sequential(
                 nn.Conv2d(dim * 2, out_channels * (scale**2), 3, 1, 1),
