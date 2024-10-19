@@ -13,7 +13,7 @@
 - Блок смешивания каналов [ChannelMix](https://github.com/Yaziwel/Restore-RWKV/blob/main/model/Restore_RWKV.py#L222): Используется для обобщения и улучшения восприятия.
 - [OmniShift](https://github.com/Yaziwel/Restore-RWKV/blob/main/model/Restore_RWKV.py#L81): Также метод обобщения. Несмотря на то, что он значительно замедляет тренировку, за счёт репараметризации существенно улучшает вывод при минимальных временных затратах.
 ### Небольшие результаты тестирования (позже, когда сделаю предварительные, я выложу полноценную статистику):
-### blue - FlexNet | green - ESRGAN
+#### blue - FlexNet | green - ESRGAN
 ```mermaid
 xychart-beta
     title "FlexNet vs ESRGAN"
