@@ -14,7 +14,7 @@ The primary goal of this network is to create a transformer with medium inferenc
 - [OmniShift](https://github.com/Yaziwel/Restore-RWKV/blob/main/model/Restore_RWKV.py#L81): Another generalization method. Although it significantly slows down training, it improves inference greatly with minimal time overhead due to reparameterization.
 ### Preliminary Test Results (later, once I finish the preliminary tests, I'll publish the full statistics):
 
-### blue - FlexNet | green - ESRGAN
+#### blue - FlexNet | green - ESRGAN
 ```mermaid
 xychart-beta
     title "FlexNet vs ESRGAN"
